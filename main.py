@@ -4,7 +4,6 @@ import torch
 from models import MockModel
 import glob
 
-
 def get_device():
     """Check for GPU availability."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -13,7 +12,7 @@ def get_device():
 
 
 def load_data(device):
-    data_path = "/scratch/DL24FA"
+    data_path = "./src/dataset/probe_dataset"
 
     probe_train_ds = create_wall_dataloader(
         data_path=f"{data_path}/probe_normal/train",

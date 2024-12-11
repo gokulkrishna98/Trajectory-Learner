@@ -1,2 +1,7 @@
 src/dataset/actions.npy
 src/dataset/states.npy
+src/__pycache__/models.cpython-312.pyc
+src/__pycache__/utils.cpython-312.pyc
+src/checkpoints/
+src/dataset/probe_dataset.zip
+src/dataset/probe_dataset/*
