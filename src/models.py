@@ -86,6 +86,7 @@ class JEPAModel(nn.Module):
         super().__init__()
         self.encoder = VICRegModel(SimpleEncoder(embed_size, input_channel_size))
         self.predictor = Predictor(input_channel_size, embed_size)
+        self.repr_dim = 1024
         
     def set_predictor(self, o, co, use_expander=False):
         x, z = self.encoder.forward(o)
@@ -105,16 +106,17 @@ class JEPAModel(nn.Module):
 
         return sy_hat, sy
 
-    def forward_inference(self, actions, states):
-        B, L, D = states.shape[0], actions.shape[1], self.predictor.hidden_size
+    def forward_inference(self, actions, state):
+        B, L, D = state.shape[0], actions.shape[1], self.repr_dim
 
-        o = states[:, 0, :, :, :]
+        o = state 
         co = torch.zeros((B, D)).to(o.device)
         self.set_predictor(o, co, use_expander=False)
 
-        result = torch.empty((B, L, D))
-        for i in range(L):
-            sy_hat, _ = self.forward(actions[:, i, :], state=None)
+        result = torch.empty((B, L+1, D))
+        result[:, 0, :], _ = self.encoder(state) 
+        for i in range(1, L+1):
+            sy_hat, _ = self.forward(actions[:, i-1, :], state=None)
             result[:, i, :] = sy_hat
 
         return result
