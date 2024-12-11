@@ -1,7 +1,7 @@
 from dataset import create_wall_dataloader
 from evaluator import ProbingEvaluator
 import torch
-from models import JEPAModel
+from models import JEPAModel, JEPAModelv2
 import glob
 
 def get_device():
@@ -47,6 +47,8 @@ def load_model():
     model_path = "./src/checkpoints/join_model_9.pth"
     model = JEPAModel(1024, 2)
     model.load_state_dict(torch.load(model_path, weights_only=True))
+    # model = JEPAModelv2(432, 2048, 2, 2)
+    # model.load_state_dict(torch.load(model_path, weights_only=True))
     model = model.to(device)
     return model
 
