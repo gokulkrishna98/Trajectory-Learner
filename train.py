@@ -83,7 +83,7 @@ if __name__ == "__main__":
 
     model = MeowMeowModel(training_mode=True)
     model.to(device)
-    epochs = 20
+    epochs = 30
     lr = 1e-4
     _, _ = train(model, dataloader, epochs, lr, device)
 

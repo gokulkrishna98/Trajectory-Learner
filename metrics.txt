@@ -1,11 +1,10 @@
-probe_normal val loss: 4.493244647979736
-probe_wall val loss: 7.953063011169434
-probe_wall_other val loss: 8.405169486999512
-probe_expert val loss: 83.0409011840820
+probe_normal val loss: 3.3431990146636963
+probe_wall val loss: 8.719242095947266
+probe_wall_other val loss: 9.906745910644531
+probe_expert val loss: 55.38624572753906
 Total Trainable Parameters: 4,945,712
 
 # training command to replicate your submitted model
-# Our model can be trained by using the below command which would generate "jepa_model.pth" 
-# model file in the checkpoint directory. 
+# Our model can be trained by using the below command which would generate "jepa_model.pth" model file in the checkpoint directory. 
 # For the ease of running the prober, we have added the model with this submission inside the "checkpoint" directory.
 python train.py
