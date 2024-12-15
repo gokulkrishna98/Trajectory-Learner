@@ -88,4 +88,4 @@ if __name__ == "__main__":
     _, _ = train(model, dataloader, epochs, lr, device)
 
     # Optionally, save the final model
-    save_model(model, "model")
+    save_model(model, "model_train")

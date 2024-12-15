@@ -4,7 +4,23 @@ probe_wall_other val loss: 9.906745910644531
 probe_expert val loss: 55.38624572753906
 Total Trainable Parameters: 4,945,712
 
-# training command to replicate your submitted model
-# Our model can be trained by using the below command which would generate "jepa_model.pth" model file in the checkpoint directory. 
-# For the ease of running the prober, we have added the model with this submission inside the "checkpoint" directory.
+
+# Files relevant for our submission
+# 1. Train.py - This file contains the training script for JEPA model.
+# 2. Models.py - This file contains all of our models with proper docstrings.
+# 3. Dataset.py - This file contains our custom built dataset trajectory class for easy processing of the dataset.
+# 4. src/ directory - This directory contains our testing scripts and jupyter notebooks which we used for testing purposes.
+
+
+# Training command to replicate your submitted model
+# 1. The JEPA model can be trained using the "train.py" file, which will generate "jepa_model_train.pth" as the resultant model in the "checkpoint" directory. 
+# 2. Once the training for JEPA is completed, pls update line number 81 in the "main.py" file with the name (checkpoint/jepa_model_train.pth), to load the newly trained JEPA model and run the prober.
+# 3. Command to run the training script for JEPA is:
 python train.py
+
+
+## Note ##
+# For running the prober, we have currently provided our pre-trained JEPA model with the name (jepa_model) inside the "checkpoint" directory.
+# And, we can train the prober using the main.py file with the given pretrained JEPA model (checkpoint/jepa_model.pth), using the below command:
+# But, if you want to train the JEPA model first and then run the prober, please follow the steps mentioned above and make relevant changes.
+python main.py
