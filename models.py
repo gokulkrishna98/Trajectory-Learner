@@ -69,11 +69,23 @@ class Prober(torch.nn.Module):
 
 # Main models developed by our team
 class MeowMeowEnvironmentEncoder(nn.Module):
+    """
+    Encodes the wall (environment) into a fixed-dimensional embedding.
+    """
+
     def __init__(self,
                 wall_shape=(1, 65, 65),
                 embedding_dim=128,
                 stride=2
             ):
+        """
+        Initializes the environment encoder.
+
+        Args:
+            wall_shape (tuple): Shape of the input wall (channels, height, width).
+            embedding_dim (int): Dimensionality of the output embedding.
+            stride (int): Stride for convolution layers.
+        """
         super().__init__()
 
         self.stride = stride
@@ -92,6 +104,15 @@ class MeowMeowEnvironmentEncoder(nn.Module):
         self.flatten = nn.Flatten()
 
     def forward(self, x):
+        """
+        Forward pass of the environment encoder.
+
+        Args:
+            x (Tensor): Input wall tensor. Shape: [batch_size, timestamp, channel, height, width].
+
+        Returns:
+            Tensor: Encoded environment representation.
+        """
         x = torch.squeeze(x, dim=1) # batch_size, ch, height, width
         x = self.cnn_model(x)
         x = self.flatten(x)
@@ -99,11 +120,23 @@ class MeowMeowEnvironmentEncoder(nn.Module):
         return x
     
 class MeowMeowObservationEncoder(nn.Module):
+    """
+    Encodes a sequence of observations (agents) into a fixed-dimensional embedding.
+    """
+
     def __init__(self,
                 obs_shape=(1, 65, 65),
                 embedding_dim=128,
                 stride=2
             ):
+        """
+        Initializes the observation encoder.
+
+        Args:
+            obs_shape (tuple): Shape of the input observation (channels, height, width).
+            embedding_dim (int): Dimensionality of the output embedding.
+            stride (int): Stride for convolution layers.
+        """
         super().__init__()
 
         self.stride = stride
@@ -123,6 +156,15 @@ class MeowMeowObservationEncoder(nn.Module):
         self.flatten = nn.Flatten(start_dim=1)
 
     def forward(self, x):
+        """
+        Forward pass of the observation encoder. It generates an encoding of the observation (channel - 0).
+
+        Args:
+            x (Tensor): Input observations tensor. Shape: [batch_size, time_steps, channels, height, width].
+
+        Returns:
+            Tensor: Encoded observation representation. Shape [batch_size, time_steps, embedding_dim]
+        """
         batch_size, time_steps, channels, height, width = x.shape
         x = x.contiguous().view(batch_size * time_steps, channels, height, width)
         x = self.cnn_model(x)
@@ -132,10 +174,21 @@ class MeowMeowObservationEncoder(nn.Module):
         return x
 
 class MeowMeowParentEncoder(nn.Module):
+    """
+    Combines the encoded observations and environment embeddings into a single embedding which 
+    is then passed to the predictor along with the action.
+    """
     def __init__(self, 
                 environment_embedding_dim=128,
                 embedding_dim=128
             ):
+        """
+        Initializes the parent encoder.
+
+        Args:
+            environment_embedding_dim (int): Dimensionality of the environment embedding.
+            embedding_dim (int): Dimensionality of the output embedding.
+        """
         super().__init__()
 
         self.observation_encoder = MeowMeowObservationEncoder()
@@ -145,10 +198,23 @@ class MeowMeowParentEncoder(nn.Module):
         )
     
     def forward(self, observation, environment_embedding):
+        """
+        Forward pass of the parent encoder. The parent encoder can generate 'T (timestamps)' number of
+        embeddings based on the observation. In order to generate similar embeddings, the wall embeddings 
+        are repeated based on the 'T' parameter. 
+
+        Args:
+            observation (Tensor): Input observation tensor. Shape: [batch_size, time_steps, channels, height, width].
+            environment_embedding (Tensor): Input environment embedding. Shape: [batch_size, embedding_dim].
+
+        Returns:
+            Tensor: Combined embedding of observations and environment. Shape: [batch_size, time_steps, embedding_dim].
+        """
         observation_embedding = self.observation_encoder(observation)
         
         batch_size, time_steps, _ = observation_embedding.shape
 
+        # Generate same number of embeddings for the wall
         environment_embedding = environment_embedding.unsqueeze(1)
         environment_embedding = environment_embedding.repeat(1, time_steps, 1)
 
@@ -159,7 +225,17 @@ class MeowMeowParentEncoder(nn.Module):
         return x
     
 class MeowMeowPredictor(nn.Module):
+    """
+    Predicts the next state embedding given the current state embedding and action.
+    """
     def __init__(self, embedding_dim=128, encoding_dim=128):
+        """
+        Initializes the predictor, which is a simple fully connected neural network.
+
+        Args:
+            embedding_dim (int): Dimensionality of the output embedding.
+            encoding_dim (int): Dimensionality of the input state encoding.
+        """
         super().__init__()
         action_encoding_dim = 16
         fc_embedding_dim = action_encoding_dim + encoding_dim
@@ -174,21 +250,52 @@ class MeowMeowPredictor(nn.Module):
         )
     
     def forward(self, state_encoding, action):
-        action = self.a_embed(action) # Encode actions
-        x = torch.cat([state_encoding, action], dim=1)
+        """
+        Forward pass of the predictor.
+
+        Args:
+            state_encoding (Tensor): Encoded state representation. Shape: [batch_size, encoding_dim].
+            action (Tensor): Input action tensor. Shape: [batch_size, 2].
+
+        Returns:
+            Tensor: Predicted state embedding. Shape: [batch_size, embedding_dim].
+        """
+        action = self.a_embed(action) # Generate encodings for the action
+        x = torch.cat([state_encoding, action], dim=1) # Concatenate the encodings
         x = self.fully_connected(x)
         return x
     
 def off_diagonal(x):
+    """
+    Extracts the off-diagonal elements of a square matrix. Used in the VICReg loss calculation
+    for covariance between the embeddings. Referred from "VICReg" documentation.
+
+    Args:
+        x (Tensor): Input square matrix. Shape: [n, n].
+
+    Returns:
+        Tensor: Off-diagonal elements of the matrix. Shape: [(n-1) * n].
+    """
     n, m = x.shape
     assert n == m
     return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
 
+
 class MeowMeowModel(nn.Module):
+    """
+    Main JEPA model that encodes environments, processes observations, and predicts future states.
+    """
     def __init__(self, 
                     repr_dim=128, 
                     training_mode=False
                 ):
+        """
+        Initializes the MeowMeow JEPA model.
+
+        Args:
+            repr_dim (int): Dimensionality of the latent representation.
+            training_mode (bool): Whether the model is in training mode.
+        """
         super().__init__()
         self.repr_dim = repr_dim
         self.training_mode = training_mode
@@ -197,6 +304,21 @@ class MeowMeowModel(nn.Module):
         self.predictor = MeowMeowPredictor(embedding_dim=self.repr_dim, encoding_dim=self.repr_dim) # predicts state representation
     
     def forward(self, states, actions):
+        """
+        Forward pass of the MeowMeow model. We take the initial timestamp (0) and generate relevant
+        embeddings for both state and action, and then produce predictions and target representations
+        based on the training mode of the model.
+
+        Args:
+            states (Tensor): Input state tensor. Shape: [batch_size, time_steps, channels, height, width].
+            actions (Tensor): Input action tensor. Shape: [batch_size, time_steps-1, 2].
+
+        Returns:
+            Tuple[Tensor, Tensor, Tensor]: 
+                - Environment encoding. Shape: [batch_size, repr_dim].
+                - Predicted state embeddings. Shape: [batch_size, time_steps, repr_dim].
+                - Encoded state embeddings (if training mode). Shape: [batch_size, time_steps-1, repr_dim].
+        """
         _, time_steps, _ = actions.shape
         predicted_state_embeddings = []
         encoded_state_embeddings = None
@@ -223,6 +345,11 @@ class MeowMeowModel(nn.Module):
         return env_encoding, predicted_state_embeddings, encoded_state_embeddings
     
     def loss(self, predicted_states, encoded_states, env_encoding):
+        """
+        Computes the total loss for the model, including MSE, variance, and covariance losses.
+        Implementation referred from VICReg documentation.
+        """
+
         # Invariance Loss or D loss between predicted and encoded states
         predicted_states = predicted_states[:, 1:]
         batch_size, time_steps = predicted_states.shape[0], predicted_states.shape[1]
