@@ -117,7 +117,7 @@ class ProbingEvaluator:
 
                 # Forward pass using the `forward` method of JEPAModel
                 init_states = batch.states[:, 0:1]  # BS, 1, C, H, W
-                pred_encs, _, _ = model(init_states, actions)
+                _, pred_encs, _= model(init_states, actions)
                 pred_encs = pred_encs.transpose(0, 1)  # # BS, T, D --> T, BS, D
 
                 # Make sure pred_encs has shape (T, BS, D) at this point
@@ -219,7 +219,7 @@ class ProbingEvaluator:
 
             # Forward pass using the `forward` method of JEPAModel
             init_states = batch.states[:, 0:1]  # BS, 1, C, H, W
-            pred_encs, _, _ = model(init_states, actions)
+            _, pred_encs, _= model(init_states, actions)
             pred_encs = pred_encs.transpose(0, 1)  # # BS, T, D --> T, BS, D
 
             # Make sure pred_encs has shape (T, BS, D) at this point
