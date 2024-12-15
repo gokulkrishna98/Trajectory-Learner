@@ -10,7 +10,7 @@ import torch.optim as optim
 from tqdm import tqdm
 
 from dataset import TrajectoryDataset
-from model import MeowMeowModel
+from models import MeowMeowModel
 
 def get_device():
     """Check for GPU availability."""
