@@ -1,8 +1,8 @@
 from dataset import create_wall_dataloader
 from evaluator import ProbingEvaluator
 import torch
-from models import JEPAModel, JEPAModelv2
-import glob
+from models import MockModel, MeowMeowModel
+
 
 def get_device():
     """Check for GPU availability."""
@@ -12,7 +12,7 @@ def get_device():
 
 
 def load_data(device):
-    data_path = "./src/dataset/probe_dataset"
+    data_path = "/scratch/DL24FA"
 
     probe_train_ds = create_wall_dataloader(
         data_path=f"{data_path}/probe_normal/train",
@@ -35,21 +35,51 @@ def load_data(device):
         train=False,
     )
 
-    probe_val_ds = {"normal": probe_val_normal_ds, "wall": probe_val_wall_ds}
+    probe_val_wall_other_ds = create_wall_dataloader(
+        data_path=f"{data_path}/probe_wall_other/val",
+        probing=True,
+        device=device,
+        train=False,
+    )
+
+    probe_val_ds = {
+        "normal": probe_val_normal_ds,
+        "wall": probe_val_wall_ds,
+        "wall_other": probe_val_wall_other_ds,
+    }
 
     return probe_train_ds, probe_val_ds
+
+
+def load_expert_data(device):
+    data_path = "/scratch/DL24FA"
+
+    probe_train_expert_ds = create_wall_dataloader(
+        data_path=f"{data_path}/probe_expert/train",
+        probing=True,
+        device=device,
+        train=True,
+    )
+
+    probe_val_expert_ds = {
+        "expert": create_wall_dataloader(
+            data_path=f"{data_path}/probe_expert/val",
+            probing=True,
+            device=device,
+            train=False,
+        )
+    }
+
+    return probe_train_expert_ds, probe_val_expert_ds
 
 
 def load_model():
     """Load or initialize the model."""
     # TODO: Replace MockModel with your trained model
     device = get_device()
-    model_path = "./src/checkpoints/join_model_9.pth"
-    model = JEPAModel(1024, 2)
-    model.load_state_dict(torch.load(model_path, weights_only=True))
-    # model = JEPAModelv2(432, 2048, 2, 2)
-    # model.load_state_dict(torch.load(model_path, weights_only=True))
-    model = model.to(device)
+    model = MeowMeowModel()
+    model.load_state_dict(torch.load("jepa_model.pth", weights_only=True))
+    model.to(device)
     return model
 
 
@@ -72,6 +102,13 @@ def evaluate_model(device, model, probe_train_ds, probe_val_ds):
 
 if __name__ == "__main__":
     device = get_device()
-    probe_train_ds, probe_val_ds = load_data(device)
     model = load_model()
+    
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Total Trainable Parameters: {total_params:,}")
+
+    probe_train_ds, probe_val_ds = load_data(device)
     evaluate_model(device, model, probe_train_ds, probe_val_ds)
+
+    probe_train_expert_ds, probe_val_expert_ds = load_expert_data(device)
+    evaluate_model(device, model, probe_train_expert_ds, probe_val_expert_ds)

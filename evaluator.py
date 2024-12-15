@@ -20,7 +20,7 @@ from normalizer import Normalizer
 @dataclass
 class ProbingConfig(ConfigBase):
     probe_targets: str = "locations"
-    lr: float = 0.0002
+    lr: float = 0.02
     epochs: int = 20
     schedule: LRSchedule = LRSchedule.Cosine
     sample_timesteps: int = 30
@@ -112,9 +112,12 @@ class ProbingEvaluator:
             for batch in tqdm(dataset, desc="Probe prediction step"):
                 ################################################################################
                 # TODO: Forward pass through your model
-                init_states = batch.states[:, 0, :, :, :]  # BS, 1, C, H, W
-                # pred_encs = model(states=init_states, actions=batch.actions)
-                pred_encs = model.forward_inference(batch.actions, init_states)
+                init_states = batch.states  # BS, T, C, H, W
+                actions = batch.actions  # BS, T-1, 2
+
+                # Forward pass using the `forward` method of JEPAModel
+                init_states = batch.states[:, 0:1]  # BS, 1, C, H, W
+                pred_encs, _, _ = model(init_states, actions)
                 pred_encs = pred_encs.transpose(0, 1)  # # BS, T, D --> T, BS, D
 
                 # Make sure pred_encs has shape (T, BS, D) at this point
@@ -211,10 +214,13 @@ class ProbingEvaluator:
         for idx, batch in enumerate(tqdm(val_ds, desc="Eval probe pred")):
             ################################################################################
             # TODO: Forward pass through your model
-            init_states = batch.states[:, 0, :, :, :]  # BS, 1 C, H, W
-            pred_encs = model.forward_inference(batch.actions, init_states) 
-            # # BS, T, D --> T, BS, D
-            pred_encs = pred_encs.transpose(0, 1)
+            init_states = batch.states  # BS, T, C, H, W
+            actions = batch.actions  # BS, T-1, 2
+
+            # Forward pass using the `forward` method of JEPAModel
+            init_states = batch.states[:, 0:1]  # BS, 1, C, H, W
+            pred_encs, _, _ = model(init_states, actions)
+            pred_encs = pred_encs.transpose(0, 1)  # # BS, T, D --> T, BS, D
 
             # Make sure pred_encs has shape (T, BS, D) at this point
             ################################################################################

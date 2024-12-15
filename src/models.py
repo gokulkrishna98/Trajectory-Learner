@@ -50,10 +50,10 @@ class VICRegModel(nn.Module):
         super().__init__()
         self.backbone = backbone
         self.projection_head = VICRegProjectionHead(
-            input_dim=1024,
-            hidden_dim=2048,
-            output_dim=1024,
-            num_layers=3,
+            input_dim=256,
+            hidden_dim=512,
+            output_dim=512,
+            num_layers=2,
         )
     def forward(self, x):
         x = self.backbone(x).flatten(start_dim=1)

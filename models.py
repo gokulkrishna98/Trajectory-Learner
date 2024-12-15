@@ -3,7 +3,6 @@ import numpy as np
 from torch import nn
 from torch.nn import functional as F
 import torch
-from lightly.models.modules.heads import VICRegProjectionHead
 
 def build_mlp(layers_dims: List[int]):
     layers = []
@@ -20,12 +19,10 @@ class MockModel(torch.nn.Module):
     Does nothing. Just for testing.
     """
 
-    def __init__(self, device="cuda", bs=64, n_steps=17, output_dim=256):
+    def __init__(self, device="cuda", output_dim=256):
         super().__init__()
         self.device = device
-        self.bs = bs
-        self.n_steps = n_steps
-        self.repr_dim = 256
+        self.repr_dim = output_dim
 
     def forward(self, states, actions):
         """
@@ -39,7 +36,9 @@ class MockModel(torch.nn.Module):
         Output:
             predictions: [B, T, D]
         """
-        return torch.randn((self.bs, self.n_steps, self.repr_dim)).to(self.device)
+        B, T, _ = actions.shape
+
+        return torch.randn((B, T + 1, self.repr_dim)).to(self.device)
 
 
 class Prober(torch.nn.Module):
@@ -68,214 +67,194 @@ class Prober(torch.nn.Module):
         return output
 
 
-class SimpleEncoder(nn.Module):
-    def __init__(self, embed_size, input_channel=3):
+# Main models developed by our team
+class MeowMeowEnvironmentEncoder(nn.Module):
+    def __init__(self,
+                input_shape=(1, 65, 65),
+                embedding_dim=128,
+                stride=2
+            ):
         super().__init__()
-        self.conv1 = nn.Conv2d(input_channel, 12, padding=1, kernel_size=3)
-        self.conv2 = nn.Conv2d(12, 12, padding=1, kernel_size=3)
-        self.conv3 = nn.Conv2d(12, 12, padding=1, kernel_size=3)
-        self.bn1 = nn.BatchNorm2d(12)
-        self.bn2 = nn.BatchNorm2d(12)
-        self.bn3 = nn.BatchNorm2d(12)
-        self.relu = nn.ReLU()
-        self.pool1 = nn.MaxPool2d((5, 5), stride=2)
-        self.pool2 = nn.MaxPool2d((5, 5), stride=5)
-        self.fc1 = nn.Linear(432, 4096)
-        self.fc2 = nn.Linear(4096, embed_size)
 
-    def forward(self, x):
-        # h,w = 65
-        x = self.conv1(x)        
-        x = self.bn1(x)
-        x = self.relu(x)
-        x1 = x
+        channels, height, width = input_shape
+        self.stride = stride
 
-        x2 = self.conv2(x1)
-        x2 = self.bn2(x2)
-        x2 = self.relu(x2)
-        x2 = x2 + x1
-        x2 = self.pool1(x2)
+        height, width = (height - 1) // self.stride + 1, (width - 1) // self.stride + 1
+        height, width = (height - 1) // self.stride + 1, (width - 1) // self.stride + 1
 
-        x3 = self.conv3(x2)
-        x3 = self.bn3(x3)
-        x3 = self.relu(x3)
-        x3 = x3 + x2
-        x3 = self.pool2(x3)
-
-        x3 = x3.view(x3.size(0), -1)
-        x3 = self.fc1(x3)
-        x3 = self.relu(x3)
-        x3 = self.fc2(x3)
-        return x3
-
-class VICRegModel(nn.Module):
-    def __init__(self, backbone):
-        super().__init__()
-        self.backbone = backbone
-        self.projection_head = VICRegProjectionHead(
-            input_dim=1024,
-            hidden_dim=2048,
-            output_dim=1024,
-            num_layers=3,
+        self.cnn = nn.Sequential(
+            nn.Conv2d(channels, 32, kernel_size=3, stride=self.stride, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=self.stride, padding=1),
+            nn.ReLU(),
         )
-    def forward(self, x):
-        x = self.backbone(x).flatten(start_dim=1)
-        z = self.projection_head(x)
-        return x, z
-
-class Predictor(nn.Module):
-    def __init__(self, input_size, hidden_size) -> None:
-        super().__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.lstm_cell = nn.LSTMCell(input_size, hidden_size)
-        self.h = None
-        self.c = None
-
-    def set_hc(self, h, c):
-        self.h = h
-        self.c = c 
-    
-    def reset_hc(self):
-        self.h = self.h.zero_() 
-        self.c = self.c.zero_()
-
-    def forward(self, action):
-        self.h, self.c = self.lstm_cell(action, (self.h, self.c))
-        return self.h
-
-class JEPAModel(nn.Module):
-    def __init__(self, embed_size, input_channel_size):
-        super().__init__()
-        self.encoder = VICRegModel(SimpleEncoder(embed_size, input_channel_size))
-        self.predictor = Predictor(input_channel_size, embed_size)
-        self.repr_dim = 1024
-        
-    def set_predictor(self, o, co, use_expander=False):
-        x, z = self.encoder.forward(o)
-        so = z if use_expander else x
-        self.predictor.set_hc(so, co)
-        return so
-    
-    def reset_predictor(self):
-        self.predictor.reset_hc()
-
-    def forward(self, action=None, state=None):
-        sy_hat, sy = None, None
-        if action is not None:
-            sy_hat = self.predictor(action)
-        if state is not None:
-            sy = self.encoder(state)
-
-        return sy_hat, sy
-
-    def forward_inference(self, actions, state):
-        B, L, D = state.shape[0], actions.shape[1], self.repr_dim
-
-        o = state 
-        co = torch.zeros((B, D)).to(o.device)
-        self.set_predictor(o, co, use_expander=False)
-
-        result = torch.empty((B, L+1, D)).to(state.device)
-        result[:, 0, :], _ = self.encoder(state) 
-        for i in range(1, L+1):
-            sy_hat, _ = self.forward(actions[:, i-1, :], state=None)
-            result[:, i, :] = sy_hat
-
-        return result
-
-
-class SimpleEncoderv2(nn.Module):
-    def __init__(self, embed_size, input_channel=3):
-        super().__init__()
-        self.conv1 = nn.Conv2d(input_channel, 12, padding=1, kernel_size=3)
-        self.conv2 = nn.Conv2d(12, 12, padding=1, kernel_size=3)
-        self.conv3 = nn.Conv2d(12, 12, padding=1, kernel_size=3)
-        self.bn1 = nn.BatchNorm2d(12)
-        self.bn2 = nn.BatchNorm2d(12)
-        self.bn3 = nn.BatchNorm2d(12)
-        self.relu = nn.ReLU()
-        self.pool1 = nn.MaxPool2d((5, 5), stride=2)
-        self.pool2 = nn.MaxPool2d((5, 5), stride=5)
-        self.fc1 = nn.Linear(432, 1024)
-        self.fc2 = nn.Linear(1024, embed_size)
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(height * width * 64, embedding_dim)
 
     def forward(self, x):
-        # h,w = 65
-        x = self.conv1(x)        
-        x = self.bn1(x)
-        x = self.relu(x)
-        x1 = x
+        x = torch.squeeze(x, dim=1) # batch_size, ch, height, width
+        x = self.cnn(x)
+        x = self.flatten(x)
+        x = self.fc(x)
 
-        x2 = self.conv2(x1)
-        x2 = self.bn2(x2)
-        x2 = self.relu(x2)
-        x2 = x2 + x1
-        x2 = self.pool1(x2)
-
-        x3 = self.conv3(x2)
-        x3 = self.bn3(x3)
-        x3 = self.relu(x3)
-        x3 = x3 + x2
-        x3 = self.pool2(x3)
-
-        x3 = x3.view(x3.size(0), -1)
-        x3 = self.fc1(x3)
-        x3 = self.relu(x3)
-        x3 = self.fc2(x3)
-        return x3
+        return x
     
-class Predictorv2(nn.Module):
-    def __init__(self, hidden_dim=1024, embed_dim=512, action_dim=2):
+class MeowMeowObservationEncoder(nn.Module):
+    def __init__(self,
+                input_shape=(1, 65, 65),
+                embedding_dim=128,
+                stride=2
+            ):
         super().__init__()
-        self.hidden_dim = hidden_dim
-        self.embed_dim = embed_dim
-        self.prev_embed = None
 
-        self.linear1 = nn.Linear(embed_dim+action_dim, hidden_dim)
-        self.relu = nn.ReLU()
-        self.linear2 = nn.Linear(hidden_dim, embed_dim)
+        self.embedding_dim = embedding_dim
 
-    def set_init_embedding(self, init_embed):
-        self.prev_embed = init_embed
+        channels, height, width = input_shape
+        self.stride = stride
 
-    def forward(self, action):
-        x = torch.cat((self.prev_embed, action), dim=1)
-        x = self.linear1(x)
-        x = self.relu(x)
-        x = self.linear2(x)
+        height, width = (height - 1) // self.stride + 1, (width - 1) // self.stride + 1
+        height, width = (height - 1) // self.stride + 1, (width - 1) // self.stride + 1
+
+        self.cnn = nn.Sequential(
+            nn.Conv2d(channels, 32, kernel_size=3, stride=self.stride, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=self.stride, padding=1),
+            nn.ReLU(),
+        )
+        self.flatten = nn.Flatten(start_dim=1)
+        self.fc = nn.Linear(height * width * 64, self.embedding_dim)
+
+    def forward(self, x):
+        batch_size, time_steps, channels, height, width = x.shape
+        x = x.contiguous().view(batch_size * time_steps, channels, height, width)
+        x = self.cnn(x)
+        x = self.flatten(x)
+        x = self.fc(x)
+        x = x.view(batch_size, time_steps, -1)
         return x
 
-
-class JEPAModelv2(nn.Module):
-    def __init__(self, embed_size, hidden_size, action_size=2, input_channel_size=2):
+class MeowMeowParentEncoder(nn.Module):
+    def __init__(self, 
+                environment_embedding_dim=128,
+                embedding_dim=128
+            ):
         super().__init__()
-        self.encoder = SimpleEncoderv2(embed_size, input_channel_size)
-        self.predictor = Predictorv2(hidden_size, embed_size, action_size)
-        self.repr_dim = embed_size
+
+        self.observation_encoder = MeowMeowObservationEncoder()
+        self.fc = nn.Linear(
+            self.observation_encoder.embedding_dim + environment_embedding_dim, 
+            embedding_dim
+        )
+    
+    def forward(self, observation, environment_embedding):
+        observation_embedding = self.observation_encoder(observation)
         
-    def set_init_embedding(self, state):
-        inp = self.encoder(state)
-        self.predictor.set_init_embedding(inp)
+        batch_size, time_steps, _ = observation_embedding.shape
 
-    def forward(self, action=None, state=None):
-        sy_hat, sy = None, None
-        if action is not None:
-            sy_hat = self.predictor(action)
-        if state is not None:
-            sy = self.encoder(state)    
-        return sy_hat, sy
+        environment_embedding = environment_embedding.unsqueeze(1)
+        environment_embedding = environment_embedding.repeat(1, time_steps, 1)
 
-    def forward_inference(self, actions, state):
-        B, L, D = state.shape[0], actions.shape[1], self.repr_dim
+        x = torch.cat([observation_embedding, environment_embedding], dim=2)
+        x = x.contiguous().view(batch_size * time_steps, x.shape[-1])
+        x = self.fc(x)
+        x = x.view(batch_size, time_steps, -1)
+        return x
+    
+class MeowMeowPredictor(nn.Module):
+    def __init__(self, embedding_dim=128, action_dim=32, encoding_dim=128):
+        super().__init__()
+        self.action_embedding = nn.Sequential(
+            nn.Linear(2, action_dim),
+            nn.ReLU()
+        )
 
-        o = state
-        self.set_init_embedding(o)
+        self.fc = nn.Sequential(
+            nn.Linear(encoding_dim + action_dim, embedding_dim * 2),
+            nn.ReLU(),
+            nn.Linear(embedding_dim * 2, embedding_dim)
+        )
+    
+    def forward(self, state_encoding, action):
+        action = self.action_embedding(action) # Encode actions
+        x = torch.cat([state_encoding, action], dim=1)
+        x = self.fc(x)
+        return x
+    
+def off_diagonal(x):
+    n, m = x.shape
+    assert n == m
+    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
 
-        result = torch.empty((B, L+1, D)).to(o.device)
-        result[:, 0, :] = (self.predictor.prev_embed)
-        for i in range(1, L+1):
-            sy_hat, _ = self.forward(actions[:, i-1, :], None)
-            result[:, i, :] = sy_hat
+class MeowMeowModel(nn.Module):
+    def __init__(self, 
+                    n_steps=17, 
+                    repr_dim=128, 
+                    training=False
+                ):
+        super().__init__()
+        self.n_steps = n_steps
+        self.repr_dim = repr_dim
+        self.training = training
+        
+        self.env_encoder = MeowMeowEnvironmentEncoder(embedding_dim=self.repr_dim) # Encodes wall
+        self.parent_encoder = MeowMeowParentEncoder(embedding_dim=self.repr_dim) # Encodes wall + observation
+        self.predictor = MeowMeowPredictor(embedding_dim=self.repr_dim, encoding_dim=self.repr_dim) # predicts state representation
+    
+    def forward(self, states, actions):
+        batch_size, time_steps, action_dim = actions.shape
 
-        return result
+        path = states[:, :, 0:1, :, :].clone()
+        wall = states[:, :, 1:, :, :].clone()
+
+        # Time step 0
+        env_encoding = self.env_encoder(wall[:, :1])
+        inital_state_embedding = self.parent_encoder(path[:, :1], env_encoding)
+
+        # If training, then pre compute for all remaning timestamps, excluding first
+        target_state_embeddings = None
+        if self.training:
+            target_state_embeddings = self.parent_encoder(path[:, 1:], env_encoding)
+
+        # Loop for all time steps
+        predicted_state_embeddings = []
+        predicted_state_embeddings.append(inital_state_embedding[:, 0])
+        for i in range(time_steps):
+            pred_embedding = self.predictor(
+                                predicted_state_embeddings[i],
+                                actions[:, i]
+                            )
+            predicted_state_embeddings.append(pred_embedding)
+
+        predicted_state_embeddings = torch.stack(predicted_state_embeddings, dim=1)
+
+        return predicted_state_embeddings, target_state_embeddings, env_encoding
+    
+    def loss(self, predicted_states, target_states, env_encoding):
+        # Invariance Loss or D loss
+        predicted_states = predicted_states[:, 1:]
+        batch_size, time_steps = predicted_states.shape[0], predicted_states.shape[1]
+        
+        mse_loss = F.mse_loss(predicted_states, target_states)
+
+        # Variance Loss
+        x = predicted_states.contiguous().view(batch_size * time_steps, predicted_states.shape[-1])
+        y = target_states.contiguous().view(batch_size * time_steps, target_states.shape[-1])
+        
+        x = x - x.mean(dim=0)
+        y = y - y.mean(dim=0)
+        env_encoding = env_encoding - env_encoding.mean(dim=0)
+
+        std_x = torch.sqrt(x.var(dim=0) + 0.0001)
+        std_y = torch.sqrt(y.var(dim=0) + 0.0001)
+        std_loss = torch.mean(F.relu(1 - std_x)) / 2 + torch.mean(F.relu(1 - std_y)) / 2
+
+        std_env = torch.sqrt(env_encoding.var(dim=0) + 0.0001)
+        env_std_loss = torch.mean(F.relu(1 - std_env)) / 2 
+
+        cov_x = (x.T @ x) / (batch_size - 1)
+        cov_y = (y.T @ y) / (batch_size - 1)
+        cov_loss = off_diagonal(cov_x).pow_(2).sum().div(
+            self.repr_dim
+        ) + off_diagonal(cov_y).pow_(2).sum().div(self.repr_dim)
+
+        return mse_loss, std_loss, cov_loss, env_std_loss
