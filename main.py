@@ -78,7 +78,7 @@ def load_model():
     # TODO: Replace MockModel with your trained model
     device = get_device()
     model = MeowMeowModel()
-    model.load_state_dict(torch.load("jepa_model.pth", weights_only=True))
+    model.load_state_dict(torch.load("checkpoint/jepa_model.pth", weights_only=True))
     model.to(device)
     return model
 
