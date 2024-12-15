@@ -81,9 +81,9 @@ if __name__ == "__main__":
 
     model = MeowMeowModel(training=True)
     model.to(device)
-    epochs = 20
+    epochs = 50
     lr = 1e-4
     predicted_state_embeddings, target_state_embeddings = train(model, dataloader, epochs, lr, device)
 
     # Optionally, save the final model
-    save_model(model, "trained_model")
+    save_model(model, "model")
